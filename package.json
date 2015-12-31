@@ -1,0 +1,17 @@
+{
+  "name": "node_honey",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "g": "^2.0.0",
+    "pty.js": "^0.3.0",
+    "ssh2": "^0.4.13"
+  },
+  "devDependencies": {},
+  "description": "a small honey bot script using docker to log commands and file system changes"
+}
