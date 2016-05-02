@@ -23,8 +23,11 @@ Docker.create([
 	//'--net=none',
 	'--cpuset-cpus=1',
 	'-m=200M',
-	'-h', 'mmis1000-G1-7528-pot'
-], 'ubuntu')
+	'-h', 'mmis1000-G1-7528-pot',
+	'--privileged=false',
+	'--kernel-memory=10M',
+	'--pids-limit=20'
+], 'mmis1000/test:v2')
 .then(function (docker) {
 	console.log('starting docekr...')
 	container = docker;
@@ -92,8 +95,9 @@ new ssh2.Server({
 	var ip = info.ip;
 	var clientType = info.header.identRaw;
 	
-  console.log(connectionId + ': ' + 'Client connected!');
-  console.log(connectionId + ': ' + 'using ' + clientType + ' from ' + ip);
+  console.log(connectionId + ': Client connected!');
+  console.log(connectionId + ': using ' + clientType + ' from ' + ip);
+	console.log(connectionId + ': connected with info: ' + JSON.stringify(info));
 	var term, terminal, user = null, passowrd = null;
 	
   client.on('authentication', function(ctx) {
@@ -115,6 +119,10 @@ new ssh2.Server({
 			console.log(connectionId + ': ' + 'Client create session!');
 			var rows, cols;
       var session = accept();
+			session.on('env', function (accept, reject, info) {
+				console.log(connectionId + ': ' + 'client want to set ' + info.key + ' to ' + info.val)
+				accept && accept();
+			})
       session.once('pty', function(accept, reject, info) {
 				console.log(connectionId + ': ' + 'client request pty with ' + JSON.stringify(info))
         rows = info.rows;
@@ -170,10 +178,10 @@ new ssh2.Server({
 			})
     });
   }).on('end', function() {
-    console.log('Client disconnected');
+    console.log(connectionId + ': ' + 'Client disconnected');
 		quitTerm(terminal);
   }).on('error', function(err) {
-    console.log('Client error', err);
+    console.log(connectionId + ': ' + 'Client error', err);
 		quitTerm(terminal);
     // ignore errors
   });
