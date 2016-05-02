@@ -242,14 +242,13 @@ Docker.prototype.getPty = function getPty(cols, rows, user) {
 		'-u', user,
 		this.id,
 		
-		
 		'env',
 		'TERM=xterm',
 		
 		'script',
 		'-q',
 		'-c',
-		'/bin/bash',
+		'/bin/bash -l',
 		'/dev/null'
 		
 		//'env',
