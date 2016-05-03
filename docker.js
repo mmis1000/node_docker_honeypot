@@ -6,6 +6,8 @@ var util = require('util')
 
 var execP = Q.denodeify(child_process.exec);
 var execFileP =  Q.denodeify(child_process.execFile);
+var spawn = child_process.spawn;
+
 function Docker(args, image) {
 	EventEmitter.call(this);
 	
@@ -204,7 +206,24 @@ Docker.prototype.execCommandInDcoker = function execCommandInDcoker(command, sup
 	})
 	return deferred.promise;
 }
-
+Docker.prototype.spawnInDocker = function(command) {
+	console.log('docker' ,[
+		'exec',
+		'-i',
+		this.id,
+		'bash',
+		'-c',
+		command
+	])
+	return spawn('docker' ,[
+		'exec',
+		'-i',
+		this.id,
+		'bash',
+		'-c',
+		command
+	])
+}
 Docker.prototype.getUserId = function getUserId(userName) {
 	var deferred = Q.defer();
 	this.execCommandInDcoker('id -u ' + userName + ' 2>dev/null')

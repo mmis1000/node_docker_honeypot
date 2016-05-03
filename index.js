@@ -6,6 +6,8 @@ var ssh2 = require('ssh2'),
     utils = ssh2.utils;
 var pty = require('pty.js');
 
+
+var buffersEqual = require('buffer-equal-constant-time');
 var readline = require('readline');
 
 var LoggerStream = require('./transform_logger')
@@ -18,6 +20,8 @@ var container = null;
 var Docker = require('./docker.js');
 
 var logFolder = 'logs'
+
+var pubKey = utils.genPublicKey(utils.parseKey(fs.readFileSync('keys/client.pub')));
 
 Docker.create([
 	//'--net=none',
@@ -89,7 +93,10 @@ function getId (len) {
 }
 
 new ssh2.Server({
-  privateKey: fs.readFileSync('keys/id_rsa'),
+  hostKeys: [fs.readFileSync('keys/id_rsa')],
+  debug: function (str) {
+  	console.log('DEBUG: ' + str);
+  }
 }, function(client, info) {
 	var connectionId = getId(8);
 	var ip = info.ip;
@@ -105,12 +112,28 @@ new ssh2.Server({
 
 		if (!ctx.username.match(/^[a-z_][a-z0-9_]{0,29}[a-z0-9]$/)) {
 			return ctx.reject();
-		} else if (ctx.method !== 'password') {
-      return ctx.reject(['password']);
-		} else {
+		} else if (ctx.method === 'publickey'
+             && ctx.key.algo === pubKey.fulltype
+             && buffersEqual(ctx.key.data, pubKey.public)) {
+      if (ctx.signature) {
+        var verifier = crypto.createVerify(ctx.sigAlgo);
+        verifier.update(ctx.blob);
+        if (verifier.verify(pubKey.publicOrig, ctx.signature))
+          ctx.accept();
+        else
+          ctx.reject();
+      } else {
+        // if no signature present, that means the client is just checking
+        // the validity of the given public key
+        ctx.accept();
+      }
+    } else if (ctx.method === 'password'){
 			passowrd = ctx.password;
 			console.log(connectionId + ': ' + user + ' authed using password: ' + passowrd)
 			ctx.accept();
+		} else {
+			console.log(connectionId + ': trying to auth with ' + ctx.method + ' but not supported')
+			ctx.reject(['publickey', 'password'])
 		}
   }).on('ready', function() {
     console.log(connectionId + ': ' + 'Client authenticated!');
@@ -176,6 +199,67 @@ new ssh2.Server({
 				terminal && terminal.resize(info.cols, info.rows);
 			
 			})
+			
+      session.once('exec', function(accept, reject, info) {
+      	
+				container.getUserId(user)
+				.then(function (res) {
+					if (res === null) {
+						return container.createUser(user, passowrd)
+					}
+					return null;
+				})
+				.then(function (res) {
+	        console.log('Client wants to execute: ' + inspect(info.command));
+	        var stream = accept();
+	        var commandToRun;
+	        if (user === 'root') {
+	        	commandToRun = /*'cd /root;' + */info.command;
+	        } else {
+	        	commandToRun = /*'cd /home/'+ user + ';' + */info.command;
+	        }
+	        
+	        /*stream.stderr.write('Oh no, the dreaded errors!\n');
+	        stream.write('Just kidding about the errors!\n');
+	        stream.exit(0);
+	        stream.end();*/
+	        var commandProcess = container.spawnInDocker(commandToRun);
+	        
+	        var stdinLogFilePath = path.resolve(logFolder, connectionId + '-exec-stdin-' + Date.now() + '.log')
+	        var logFilePath = path.resolve(logFolder, connectionId + '-exec-' + Date.now() + '.log')
+	        
+	        
+	        
+	        console.log('log file at ' + stdinLogFilePath + '\r\nand ' + logFilePath)
+	        // stream.stdin.pipe(fs.createWriteStream(stdinLogFilePath));
+	        // stream.stdin.pipe(process.stdout)
+	        stream.pipe(fs.createWriteStream(stdinLogFilePath + '.2'));
+	        // stream.pipe(process.stdout)
+	        
+	        fs.writeFile(logFilePath, info.command);
+	        
+	        stream.pipe(commandProcess.stdin)
+	        commandProcess.stderr.pipe(stream.stderr);
+	        commandProcess.stdout.pipe(stream, {end: false});
+	        
+	        commandProcess.stdout.pipe(process.stdout);
+	        commandProcess.stderr.pipe(process.stdout);
+	        commandProcess.stdout.on('end', function(e) {
+	      		console.log('command finished')
+		        stream.exit(0);
+		        stream.end();
+	        })
+	        commandProcess.on('error', function (e) {
+	      		console.log('command failed ' + inspect(e))
+	        	try {
+	        		stream.exit(0);
+	        		stream.end();
+	        	} catch (e) {
+	        		console.log('bad exit ' + inspect(e))
+	        	}
+	        })
+				})
+      });
     });
   }).on('end', function() {
     console.log(connectionId + ': ' + 'Client disconnected');
