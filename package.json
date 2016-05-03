@@ -8,9 +8,10 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "buffer-equal-constant-time": "^1.0.1",
     "g": "^2.0.0",
     "pty.js": "^0.3.0",
-    "ssh2": "^0.4.13"
+    "ssh2": "^0.5.0"
   },
   "devDependencies": {},
   "description": "a small honey bot script using docker to log commands and file system changes"
