@@ -206,20 +206,24 @@ Docker.prototype.execCommandInDcoker = function execCommandInDcoker(command, sup
 	})
 	return deferred.promise;
 }
-Docker.prototype.spawnInDocker = function(command) {
+Docker.prototype.spawnInDocker = function(command, user) {
 	console.log('docker' ,[
 		'exec',
 		'-i',
+		'-u', user,
 		this.id,
 		'bash',
+		'-l',
 		'-c',
 		command
-	])
+	].join(' '))
 	return spawn('docker' ,[
 		'exec',
 		'-i',
+		'-u', user,
 		this.id,
 		'bash',
+		'-l',
 		'-c',
 		command
 	])
