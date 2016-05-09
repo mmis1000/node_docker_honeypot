@@ -26,12 +26,12 @@ var pubKey = utils.genPublicKey(utils.parseKey(fs.readFileSync('keys/client.pub'
 Docker.create([
   //'--net=none',
   '--cpuset-cpus=1',
-  '-m=200M',
+  '-m=500M',
   '-h', 'mmis1000-G1-7528-pot',
   '--privileged=false',
-  '--kernel-memory=10M',
-  '--pids-limit=20'
-], 'mmis1000/test:v2')
+  // '--kernel-memory=10M',
+  '--pids-limit=512'
+], 'mmis1000/test:v4')
 .then(function (docker) {
   console.log('starting docekr...')
   container = docker;
@@ -95,12 +95,13 @@ function getId (len) {
 new ssh2.Server({
   hostKeys: [fs.readFileSync('keys/id_rsa')],
   debug: function (str) {
-    console.log('DEBUG: ' + str);
+    // console.log('DEBUG: ' + str);
   }
 }, function(client, info) {
   var connectionId = getId(8);
   var ip = info.ip;
   var clientType = info.header.identRaw;
+  var procs = [];
   
   console.log(connectionId + ': Client connected!');
   console.log(connectionId + ': using ' + clientType + ' from ' + ip);
@@ -201,6 +202,7 @@ new ssh2.Server({
       })
       
       session.once('exec', function(accept, reject, info) {
+        var stream = accept();
         
         container.getUserId(user)
         .then(function (res) {
@@ -211,78 +213,76 @@ new ssh2.Server({
         })
         .then(function (res) {
           console.log('Client wants to execute: ' + inspect(info.command));
-          var stream = accept();
+          
           var commandToRun;
+          /*
           if (user === 'root') {
-            commandToRun = /*'cd /root;' + */info.command;
+            commandToRun = 'cd /root/; ' + info.command;
           } else {
-            commandToRun = /*'cd /home/'+ user + ';' + */info.command;
+            commandToRun = 'cd /home/' + user + '/; ' + info.command;
           }
+          */
+          commandToRun = 'cd "$HOME"; ' + info.command;
+          var commandProcess = container.spawnInDocker(commandToRun, user);
           
-          /*stream.stderr.write('Oh no, the dreaded errors!\n');
-          stream.write('Just kidding about the errors!\n');
-          stream.exit(0);
-          stream.end();*/
-          var commandProcess = container.spawnInDocker(commandToRun);
-          
+          procs.push(commandProcess);
+        
           var stdinLogFilePath = path.resolve(logFolder, connectionId + '-exec-stdin-' + Date.now() + '.log')
           var logFilePath = path.resolve(logFolder, connectionId + '-exec-' + Date.now() + '.log')
           
-          
-          
           console.log('log file at ' + stdinLogFilePath + '\r\nand ' + logFilePath)
-          // stream.stdin.pipe(fs.createWriteStream(stdinLogFilePath));
-          // stream.stdin.pipe(process.stdout)
-          stream.pipe(fs.createWriteStream(stdinLogFilePath + '.2'));
-          // stream.pipe(process.stdout)
           
+          stream.stdin.pipe(fs.createWriteStream(stdinLogFilePath + '.2'), {end: false});
           fs.writeFile(logFilePath, info.command);
           
-          stream.pipe(commandProcess.stdin)
-          commandProcess.stderr.pipe(stream.stderr);
-          commandProcess.stdout.pipe(stream, {end: false});
+          stream.stdin.pipe(commandProcess.stdin);
+          commandProcess.stderr.pipe(stream.stderr, {end: false});
+          commandProcess.stdout.pipe(stream.stdout, {end: false});
           
-          commandProcess.stdout.pipe(process.stdout);
-          commandProcess.stderr.pipe(process.stdout);
-          commandProcess.stdout.on('end', function(e) {
-            console.log('command finished')
-            stream.exit(0);
-            stream.end();
-          })
-          commandProcess.on('error', function (e) {
-            console.log('command failed ' + inspect(e))
-            try {
-              stream.exit(0);
-              stream.end();
-            } catch (e) {
-              console.log('bad exit ' + inspect(e))
-            }
-          })
+          // commandProcess.stderr.pipe(process.stderr, {end: false});
+          // commandProcess.stdout.pipe(process.stdout, {end: false});
+          
+          commandProcess.on('exit', function(code, signal) {
+            stream.writable && stream.exit(typeof code === 'number' ? code : signal);
+            console.log('process exited with ' + code + ' ' + signal)
+          }).on('close', function() {
+            stream.writable && stream.end();
+            var idx = procs.indexOf(commandProcess);
+            if (idx !== -1)
+              procs.splice(idx, 1);
+          });
         })
       });
     });
   }).on('end', function() {
     console.log(connectionId + ': ' + 'Client disconnected');
     quitTerm(terminal);
+    
+    // cleanup any spawned processes that may still be open
+    for (var i = 0; i < procs.length; ++i)
+      procs[i].kill('SIGKILL');
+    procs.length = 0;
   }).on('error', function(err) {
     console.log(connectionId + ': ' + 'Client error', err);
     quitTerm(terminal);
     // ignore errors
   });
-}).listen(22, function() {
+}).listen(22/*, '127.0.0.1'*/, function() {
   console.log('Listening on port ' + this.address().port);
 });
 
 function logInputStream (stream, id, ip, clientType) {
   var logger = new LoggerStream(id);
-  logger.pipe(process.stdout);
+  logger.pipe(process.stdout, {end: false});
+  logger.on('end', function () {
+    logger.unpipe(process.stdout)
+  })
   
   var fileStream = fs.createWriteStream(path.resolve(__dirname, logFolder, 'tcp_dump_' + id + '_' + (new Date()).toISOString()) + '_' + ip)
   fileStream.write('using clinet ' + clientType + '\r\n');
   
   stream.pipe(logger);
   stream.pipe(fileStream);
-  
 }
 
 
